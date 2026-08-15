@@ -1,0 +1,25 @@
+{
+  "name": "Hyun's Commute Alarm",
+  "short_name": "통근알람",
+  "description": "대중교통 이동 중 목적지 접근 시 알람을 울려주는 위치 기반 알람 앱",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0f1e",
+  "theme_color": "#00d4ff",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

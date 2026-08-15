@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Hyun's Commute Alarm — 스마트 하차 알람</title>
+  <meta name="description" content="대중교통 이동 중 내릴 정류장이나 목적지를 지나치지 않도록 GPS 실시간 거리 기반으로 깨워주는 위치 알람 웹 서비스" />
+  <meta name="theme-color" content="#0a0f1e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+  <!-- Leaflet Map CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <main class="app-container">
+    <!-- 1. Header -->
+    <header class="app-header">
+      <div class="header-title-wrap">
+        <div class="logo-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="header-title">Commute Alarm</h1>
+          <p class="header-tag">hyunscommutealarm</p>
+        </div>
+      </div>
+
+      <div class="status-pill idle" id="statusPill">
+        <span class="status-dot"></span>
+        <span id="statusText">대기 중</span>
+      </div>
+    </header>
+
+    <!-- 2. 목적지 검색 및 수동 입력 -->
+    <section class="glass-card">
+      <div class="section-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+        </svg>
+        목적지 설정 (주소 검색 or 지도 클릭)
+      </div>
+
+      <div class="search-input-group">
+        <input 
+          type="text" 
+          id="destSearchInput" 
+          class="text-input" 
+          placeholder="목적지 주소, 지하철역, 장소명 입력..." 
+          autocomplete="off"
+        />
+        <button id="btnSearch" class="btn-primary-action" aria-label="검색">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+          </svg>
+          검색
+        </button>
+
+        <!-- 자동완성 검색 결과 드롭다운 -->
+        <div id="searchResultsBox" class="search-results-box"></div>
+      </div>
+
+      <!-- 선택된 목적지 안내 카드 -->
+      <div class="selected-dest-card">
+        <div class="dest-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"/>
+          </svg>
+        </div>
+        <div class="dest-details">
+          <div id="destNameDisplay" class="dest-title">목적지를 설정해주세요</div>
+          <div id="destCoordDisplay" class="dest-coord">지도에서 원하는 위치를 직접 터치해도 지정됩니다.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 대화형 지도 (Leaflet + OpenStreetMap) -->
+    <section class="map-wrapper">
+      <div id="map"></div>
+      <div class="map-floating-tip">지도를 터치하여 목적지 즉시 지정</div>
+      <button id="btnMyPos" class="map-btn-mypos" title="현재 내 위치로 이동" aria-label="내 위치">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
+        </svg>
+      </button>
+    </section>
+
+    <!-- 4. 도달 반경 수동 설정 (슬라이더 / 직접 입력) -->
+    <section class="glass-card">
+      <div class="radius-header">
+        <span class="section-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/>
+          </svg>
+          알람 발생 거리 (도달 반경)
+        </span>
+        <span id="radiusDisplay" class="radius-value-badge">500 m</span>
+      </div>
+
+      <!-- 슬라이더 -->
+      <div class="range-slider-wrap">
+        <input 
+          type="range" 
+          id="radiusRange" 
+          min="100" 
+          max="3000" 
+          step="50" 
+          value="500" 
+          aria-label="알람 도달 반경 슬라이더"
+        />
+      </div>
+
+      <!-- 빠른 선택 버튼 -->
+      <div class="quick-radii">
+        <button class="btn-chip" data-value="300">300m</button>
+        <button class="btn-chip active" data-value="500">500m</button>
+        <button class="btn-chip" data-value="1000">1km</button>
+        <button class="btn-chip" data-value="2000">2km</button>
+      </div>
+
+      <!-- 수동 숫자 입력창 -->
+      <div class="manual-radius-input-wrap">
+        <span style="font-size:0.8rem; color:var(--text-muted);">직접 입력:</span>
+        <input type="number" id="radiusNumberInput" class="number-input" value="500" min="50" max="10000" step="50" />
+        <select id="radiusUnitSelect" class="unit-select">
+          <option value="m" selected>m (미터)</option>
+          <option value="km">km (킬로미터)</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- 5. 실시간 거리 및 GPS 상태 바 -->
+    <section class="live-stats-bar">
+      <div class="stat-item">
+        <span class="stat-label">남은 직선 거리</span>
+        <span id="liveDistanceDisplay" class="stat-value highlight">-</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">GPS 수신 오차</span>
+        <span id="gpsAccuracyDisplay" class="stat-value">-</span>
+      </div>
+    </section>
+
+    <!-- 6. 감시 시작 / 감시 중단 메인 제어 버튼 -->
+    <button id="btnToggleWatch" class="main-action-btn start-btn" disabled>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
+      </svg>
+      알람 감시 시작 (ON)
+    </button>
+
+    <div class="system-tip">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+      </svg>
+      화면 꺼짐 방지(Screen Wake Lock) 및 백그라운드 GPS 추적이 적용됩니다.
+    </div>
+  </main>
+
+  <!-- 7. 풀스크린 알람 팝업 (Fullscreen Alarm Modal) -->
+  <div id="alarmOverlay" class="alarm-overlay" role="dialog" aria-modal="true" aria-labelledby="alarmHeading">
+    <div class="alarm-modal-content">
+      <div class="alarm-icon-ring">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/>
+        </svg>
+      </div>
+
+      <h2 id="alarmHeading" class="alarm-heading">목적지 접근 완료!</h2>
+      
+      <div id="alarmDestName" class="alarm-dest-text">-</div>
+      <div id="alarmCurrentDist" class="alarm-distance-info">-</div>
+
+      <!-- 수동 알람 끄기 버튼 (중앙 대형 배치) -->
+      <button id="btnDismissAlarm" class="btn-dismiss-alarm">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+        </svg>
+        알람 끄기 (확인)
+      </button>
+    </div>
+  </div>
+
+  <!-- Leaflet Map JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <!-- App Scripts -->
+  <script src="alarm.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
