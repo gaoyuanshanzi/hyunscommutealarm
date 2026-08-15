@@ -100,6 +100,26 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${(meters / 1000).toFixed(2)} km`;
   }
 
+  // 목적지 초기화 (공란 리셋)
+  function clearDestination() {
+    state.destination = null;
+    destSearchInput.value = '';
+    destNameDisplay.textContent = '목적지를 설정해주세요';
+    destCoordDisplay.textContent = '지도에서 원하는 위치를 직접 터치해도 지정됩니다.';
+    liveDistanceDisplay.textContent = '-';
+
+    if (destMarker) {
+      map.removeLayer(destMarker);
+      destMarker = null;
+    }
+    if (destCircle) {
+      map.removeLayer(destCircle);
+      destCircle = null;
+    }
+
+    validateCanStart();
+  }
+
   // 6. 목적지 설정 및 지도 갱신 함수
   function setDestination(lat, lng, name) {
     state.destination = { lat: parseFloat(lat), lng: parseFloat(lng), name: name || '선택한 목적지' };
@@ -587,6 +607,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnToggleWatch.textContent = '알람 감시 시작 (ON)';
     btnToggleWatch.className = 'main-action-btn start-btn';
+
+    // 기 설정된 목적지 내용 공란 초기화 및 마커 제거
+    clearDestination();
   }
 
   btnToggleWatch.addEventListener('click', () => {
