@@ -215,44 +215,142 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 8. OpenStreetMap Geocoding (Nominatim API)
+  // 8. 스마트 지오코딩 엔진 (Nominatim + Photon + 한국어 키워드 자동 정제)
+  
+  // 한국어 자연어 검색어 정제 함수 (예: "역삼역앞" -> "역삼역", "강남역 2번출구" -> "강남역", "시청 주변" -> "시청")
+  function cleanKoreanQuery(query) {
+    let q = query.trim();
+    // 1. 끝에 붙은 불용어/접미사 제거
+    const suffixPattern = /(앞|뒤|옆|근처|주변|부근|사거리|삼거리|오거리|역앞)$/i;
+    // 2. 출구 패턴 (예: "2번출구", "1번 출구" -> 제거)
+    const exitPattern = /\s*\d+번\s*출구/i;
+
+    const cleaned = q.replace(exitPattern, '').replace(suffixPattern, '').trim();
+    return cleaned !== q ? cleaned : null;
+  }
+
+  async function fetchNominatim(q) {
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&addressdetails=1&limit=6`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'ko,en' } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data || []).map(item => ({
+        lat: item.lat,
+        lng: item.lon,
+        title: item.display_name.split(',')[0],
+        subtitle: item.display_name,
+        source: 'osm'
+      }));
+    } catch (e) {
+      console.warn('Nominatim error:', e);
+      return [];
+    }
+  }
+
+  async function fetchPhoton(q) {
+    try {
+      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lang=ko&limit=6`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      if (!data || !data.features) return [];
+
+      return data.features.map(f => {
+        const props = f.properties;
+        const coords = f.geometry.coordinates; // [lng, lat]
+        const name = props.name || props.street || props.city || '알 수 없는 위치';
+        const details = [
+          props.country,
+          props.state,
+          props.city || props.county,
+          props.district,
+          props.street,
+          props.housenumber
+        ].filter(Boolean).join(' ');
+
+        return {
+          lat: coords[1],
+          lng: coords[0],
+          title: name,
+          subtitle: details || name,
+          source: 'photon'
+        };
+      });
+    } catch (e) {
+      console.warn('Photon error:', e);
+      return [];
+    }
+  }
+
   async function searchLocation(query) {
     if (!query || query.trim().length < 2) {
       searchResultsBox.classList.remove('show');
       return;
     }
 
+    const rawQuery = query.trim();
+    const refinedQuery = cleanKoreanQuery(rawQuery);
+
     try {
-      searchResultsBox.innerHTML = '<div style="padding:12px; font-size:0.8rem; color:#8e9eb5;">장소를 검색하는 중...</div>';
+      searchResultsBox.innerHTML = '<div style="padding:12px; font-size:0.8rem; color:#8e9eb5;">장소를 스마트하게 검색하는 중...</div>';
       searchResultsBox.classList.add('show');
 
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5`;
-      const res = await fetch(url, {
-        headers: { 'Accept-Language': 'ko,en' }
-      });
-      const data = await res.json();
+      // 1) 원본 질의로 Nominatim + Photon 동시 조회
+      let results = [];
+      const [nomRaw, photonRaw] = await Promise.all([
+        fetchNominatim(rawQuery),
+        fetchPhoton(rawQuery)
+      ]);
 
-      if (!data || data.length === 0) {
-        searchResultsBox.innerHTML = '<div style="padding:12px; font-size:0.8rem; color:#ef4444;">검색 결과가 없습니다.</div>';
+      results = [...nomRaw, ...photonRaw];
+
+      // 2) 만약 검색 결과가 없거나 부족하고, 정제된 키워드(예: "역삼역앞" -> "역삼역")가 있으면 2차 검색
+      if (results.length === 0 && refinedQuery && refinedQuery.length >= 2) {
+        const [nomRefined, photonRefined] = await Promise.all([
+          fetchNominatim(refinedQuery),
+          fetchPhoton(refinedQuery)
+        ]);
+        results = [...nomRefined, ...photonRefined];
+      }
+
+      // 중복 좌표/이름 제거 (Deduplication)
+      const uniqueResults = [];
+      const seen = new Set();
+
+      for (const item of results) {
+        const key = `${parseFloat(item.lat).toFixed(3)}_${parseFloat(item.lng).toFixed(3)}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueResults.push(item);
+        }
+      }
+
+      if (uniqueResults.length === 0) {
+        searchResultsBox.innerHTML = `
+          <div style="padding:14px; font-size:0.85rem; color:#f87171; text-align:center;">
+            '${rawQuery}' 검색 결과가 없습니다.<br/>
+            <span style="font-size:0.75rem; color:#8e9eb5; margin-top:4px; display:block;">
+              Tip: 지도에서 원하는 위치를 직접 터치하셔도 지정됩니다.
+            </span>
+          </div>
+        `;
         return;
       }
 
       searchResultsBox.innerHTML = '';
-      data.forEach(item => {
+      uniqueResults.slice(0, 6).forEach(item => {
         const itemDiv = document.createElement('div');
         itemDiv.className = 'search-item';
-        
-        const mainTitle = item.display_name.split(',')[0];
-        const subTitle = item.display_name;
 
         itemDiv.innerHTML = `
-          <strong>${mainTitle}</strong>
-          <span class="search-item-sub">${subTitle}</span>
+          <strong>${item.title}</strong>
+          <span class="search-item-sub">${item.subtitle}</span>
         `;
 
         itemDiv.addEventListener('click', () => {
-          setDestination(item.lat, item.lon, item.display_name);
-          destSearchInput.value = mainTitle;
+          setDestination(item.lat, item.lng, `${item.title} (${item.subtitle})`);
+          destSearchInput.value = item.title;
           searchResultsBox.classList.remove('show');
         });
 
