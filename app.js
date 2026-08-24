@@ -607,6 +607,50 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // 서울시 지하철 도착 메시지 및 코드로부터 목적지까지 남은 정거장 수 파싱
+  function parseSubwayRemainStations(msg, arvlCd, targetStationName) {
+    if (!msg) msg = '';
+
+    // 1) 당역 도착 / 진입 (0정거장 남음)
+    if (arvlCd === '0' || arvlCd === '1') {
+      return 0;
+    }
+    const targetClean = (targetStationName || '').replace(/역$/, '').trim();
+    if (targetClean && (
+      msg.includes(`${targetClean} 도착`) || msg.includes(`${targetClean} 진입`) || 
+      msg.includes(`${targetClean}도착`) || msg.includes(`${targetClean}진입`) ||
+      msg.includes('당역 도착') || msg.includes('당역 진입')
+    )) {
+      return 0;
+    }
+
+    // 2) "[N]번째 전역", "N번째 전역", "[N]전역" 정규식 패턴 파싱 (예: "[6]번째 전역", "[2]번째 전역")
+    const nStationMatch = msg.match(/\[?(\d+)\]?\s*번째?\s*전역/);
+    if (nStationMatch && nStationMatch[1]) {
+      return parseInt(nStationMatch[1], 10);
+    }
+
+    // 3) 숫자 없이 단독으로 "전역 도착", "전역 진입", "전역 출발" 또는 arvlCd 3, 4, 5 (1정거장 남음)
+    if (arvlCd === '3' || arvlCd === '4' || arvlCd === '5') {
+      return 1;
+    }
+    if (msg.includes('전역 도착') || msg.includes('전역 진입') || msg.includes('전역 출발') || msg.startsWith('전역')) {
+      return 1;
+    }
+
+    // 4) 분 단위 도착 메시지 (예: "3분 후 도착", "2분 후 도착")
+    const minMatch = msg.match(/(\d+)\s*분/);
+    if (minMatch && minMatch[1]) {
+      const minutes = parseInt(minMatch[1], 10);
+      if (minutes <= 2) return 1;
+      if (minutes <= 4) return 2;
+      return Math.ceil(minutes / 2);
+    }
+
+    // 파싱 불가 시 기본 안전값 (99 - 알람 안 울림)
+    return 99;
+  }
+
   // 지하철 알람 조건 판별 로직 (사용자가 선택한 특정 열차 전용)
   function checkSubwayAlarmCondition(trainItem, stationName) {
     const trainKey = trainItem.btrainNo || trainItem.trainLineNm;
@@ -616,42 +660,38 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const msg = (trainItem.arvlMsg2 || '') + (trainItem.arvlMsg3 || '');
-    const arvlCd = trainItem.arvlCd; // '0':진입, '1':도착, '3':전역출발, '4':전역진입, '5':전역도착
+    const msg = (trainItem.arvlMsg2 || '') + ' ' + (trainItem.arvlMsg3 || '');
+    const arvlCd = trainItem.arvlCd;
+    const cleanTargetStation = (stationName || (state.destination ? state.destination.name : '')).replace(/역$/, '').trim();
+
+    // 남은 정거장 수 정밀 계산
+    const remainStations = parseSubwayRemainStations(msg, arvlCd, cleanTargetStation);
 
     let shouldTrigger = false;
     let triggerReason = '';
-    const trainDesc = state.selectedTrainDesc || `[${stationName}역 방면 열차]`;
+    const trainDesc = state.selectedTrainDesc || `[${cleanTargetStation}역 방면 열차]`;
 
     // 1정거장 전 알람 ('1')
     if (state.subwayTrigger === '1') {
-      if (
-        msg.includes('전역') || 
-        arvlCd === '3' || arvlCd === '4' || arvlCd === '5' || 
-        msg.includes('도착') || msg.includes('진입')
-      ) {
+      // 남은 역 수가 1 이하(1정거장 전 또는 당역)일 때만 울림 (2 이상은 절대 안 울림)
+      if (remainStations <= 1) {
         shouldTrigger = true;
-        triggerReason = `${trainDesc} ${trainItem.arvlMsg2 || '전역 진입/도착'}`;
+        triggerReason = `${trainDesc} ${trainItem.arvlMsg2 || '1정거장 전 접근'}`;
       }
     } 
     // 2정거장 전 알람 ('2')
     else if (state.subwayTrigger === '2') {
-      if (
-        msg.includes('2번째') || msg.includes('두번째') || 
-        msg.includes('전역') || arvlCd === '4' || arvlCd === '5'
-      ) {
+      // 남은 역 수가 2 이하(2정거장 전, 1정거장 전, 당역)일 때만 울림 (3 이상은 절대 안 울림)
+      if (remainStations <= 2) {
         shouldTrigger = true;
         triggerReason = `${trainDesc} ${trainItem.arvlMsg2 || '2정거장 전 접근'}`;
       }
     } 
     // 목적지역 도착 즉시 ('0')
     else if (state.subwayTrigger === '0') {
-      if (
-        (msg.includes(stationName) && (msg.includes('도착') || msg.includes('진입'))) ||
-        arvlCd === '0' || arvlCd === '1'
-      ) {
+      if (remainStations === 0) {
         shouldTrigger = true;
-        triggerReason = `${trainDesc} ${stationName}역에 지금 도착/진입합니다!`;
+        triggerReason = `${trainDesc} ${cleanTargetStation}역에 지금 도착/진입합니다!`;
       }
     }
 
