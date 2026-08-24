@@ -559,10 +559,60 @@ input[type="range"]::-webkit-slider-thumb {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
   border-left: 4px solid var(--accent-subway);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  user-select: none;
+}
+
+.subway-train-card:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(59, 130, 246, 0.4);
+  transform: translateY(-1px);
+}
+
+.subway-train-card.selected {
+  background: rgba(37, 99, 235, 0.22);
+  border: 1px solid #3b82f6;
+  border-left: 5px solid #60a5fa;
+  box-shadow: 0 0 16px rgba(59, 130, 246, 0.35);
+}
+
+.train-info-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.train-radio-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.subway-train-card.selected .train-radio-dot {
+  border-color: #60a5fa;
+  background: #2563eb;
+}
+
+.subway-train-card.selected .train-radio-dot::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffffff;
 }
 
 .train-line-badge {
@@ -572,18 +622,41 @@ input[type="range"]::-webkit-slider-thumb {
   border-radius: 4px;
   background: #2563eb;
   color: #fff;
-  margin-right: 6px;
+  white-space: nowrap;
+}
+
+.train-dest-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.train-dest {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.train-selected-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.68rem;
+  color: #60a5fa;
+  font-weight: 700;
+  margin-top: 1px;
 }
 
 .train-msg {
   font-size: 0.88rem;
   font-weight: 700;
   color: #f87171;
+  text-align: right;
+  white-space: nowrap;
+  margin-left: 8px;
 }
 
-.train-dest {
-  font-size: 0.78rem;
-  color: var(--text-main);
+.subway-train-card.selected .train-msg {
+  color: #fb7185;
 }
 
 /* Live Distance & Stats Bar */

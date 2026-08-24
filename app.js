@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', () => {
     radiusMeters: 500,        // GPS 알람 반경 (기본 500m)
     subwayLine: 'ALL',        // 호선 필터 (ALL, 1002 등)
     subwayTrigger: '1',       // 알람 조건 ('1': 1정거장 전, '2': 2정거장 전, '0': 도착 즉시)
+    selectedTrainNo: null,    // 사용자가 직접 선택한 열차 번호/고유키
+    selectedTrainDesc: null,  // 선택된 열차 정보 요약 문구
     isWatching: false,        // 감시 진행 여부
     isAlarmRinging: false,    // 알람 발동 중 여부
     watchId: null,            // GPS watchPosition ID
@@ -172,6 +174,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // 목적지 초기화 (공란 리셋)
   function clearDestination() {
     state.destination = null;
+    state.selectedTrainNo = null;
+    state.selectedTrainDesc = null;
     destSearchInput.value = '';
     destNameDisplay.textContent = '목적지를 설정해주세요';
     destCoordDisplay.textContent = state.mode === 'GPS' 
@@ -197,6 +201,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 목적지 설정
   function setDestination(lat, lng, name, stationName) {
+    state.selectedTrainNo = null;
+    state.selectedTrainDesc = null;
+
     state.destination = {
       lat: lat ? parseFloat(lat) : null,
       lng: lng ? parseFloat(lng) : null,
@@ -529,6 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (filtered.length === 0) {
       subwayTrainList.innerHTML = `<div style="font-size:0.8rem; color:#8e9eb5; text-align:center; padding:10px;">선택한 호선의 실시간 열차가 없습니다.</div>`;
+      liveDistanceDisplay.textContent = '운행 열차 없음';
       return;
     }
 
@@ -541,38 +549,79 @@ document.addEventListener('DOMContentLoaded', () => {
       '1009': '9호선', '1077': '신분당선', '1065': '공항철도', '1063': '경의중앙', '1075': '수인분당'
     };
 
-    let closestStatus = filtered[0].arvlMsg2 || filtered[0].arvlMsg3;
-    liveDistanceDisplay.textContent = closestStatus;
+    // 선택된 열차 찾기
+    let selectedTrain = null;
+    if (state.selectedTrainNo) {
+      selectedTrain = filtered.find(item => (item.btrainNo || item.trainLineNm) === state.selectedTrainNo);
+    }
 
-    filtered.slice(0, 4).forEach(item => {
+    // 상단 상태바 텍스트 업데이트
+    if (selectedTrain) {
+      liveDistanceDisplay.textContent = selectedTrain.arvlMsg2 || selectedTrain.arvlMsg3;
+      liveStatusSubDisplay.textContent = `선택 열차 #${selectedTrain.btrainNo || ''}`;
+    } else if (state.selectedTrainNo) {
+      // 이전에 선택했던 열차가 도착 완료되었거나 목록에서 벗어난 경우
+      liveDistanceDisplay.textContent = '선택 열차 도착/통과';
+      liveStatusSubDisplay.textContent = '열차 도착 완료';
+    } else {
+      liveDistanceDisplay.textContent = '열차를 터치해 선택하세요';
+      liveStatusSubDisplay.textContent = `${stationName}역 (${filtered.length}대 운행중)`;
+    }
+
+    filtered.slice(0, 6).forEach(item => {
       const lineName = lineNames[item.subwayId] || `${item.subwayId}`;
+      const trainKey = item.btrainNo || item.trainLineNm;
+      const isSelected = state.selectedTrainNo && (trainKey === state.selectedTrainNo);
+
       const trainCard = document.createElement('div');
-      trainCard.className = 'subway-train-card';
+      trainCard.className = isSelected ? 'subway-train-card selected' : 'subway-train-card';
 
       trainCard.innerHTML = `
-        <div style="display:flex; align-items:center;">
+        <div class="train-info-left">
+          <div class="train-radio-dot"></div>
           <span class="train-line-badge">${lineName}</span>
-          <span class="train-dest">${item.trainLineNm || item.bstatnNm + '행'}</span>
+          <div class="train-dest-wrap">
+            <span class="train-dest">
+              ${item.trainLineNm || item.bstatnNm + '행'}
+              ${item.btrainNo ? '<span style="font-size:0.75rem; color:#8e9eb5; font-weight:normal;">(열차 #' + item.btrainNo + ')</span>' : ''}
+            </span>
+            ${isSelected ? '<span class="train-selected-badge">🚆 내가 탄 열차로 선택됨</span>' : ''}
+          </div>
         </div>
         <span class="train-msg">${item.arvlMsg2 || item.arvlMsg3}</span>
       `;
 
+      // 열차 카드 터치 시 해당 열차 단독 선택
+      trainCard.addEventListener('click', () => {
+        state.selectedTrainNo = trainKey;
+        state.selectedTrainDesc = `[${lineName}] ${item.trainLineNm || item.bstatnNm + '행'}${item.btrainNo ? ' (#' + item.btrainNo + ')' : ''}`;
+        renderSubwayFeeds(list, stationName);
+      });
+
       subwayTrainList.appendChild(trainCard);
 
-      // 감시 중일 때 알람 조건 만족 여부 확인
-      if (state.isWatching && !state.isAlarmRinging && state.mode === 'SUBWAY') {
+      // 감시 중일 때: 오직 사용자가 선택한 열차만 알람 조건 검사
+      if (state.isWatching && !state.isAlarmRinging && state.mode === 'SUBWAY' && isSelected) {
         checkSubwayAlarmCondition(item, stationName);
       }
     });
   }
 
-  // 지하철 알람 조건 판별 로직
+  // 지하철 알람 조건 판별 로직 (사용자가 선택한 특정 열차 전용)
   function checkSubwayAlarmCondition(trainItem, stationName) {
+    const trainKey = trainItem.btrainNo || trainItem.trainLineNm;
+    
+    // 사용자가 선택한 열차가 아니면 무시
+    if (!state.selectedTrainNo || trainKey !== state.selectedTrainNo) {
+      return;
+    }
+
     const msg = (trainItem.arvlMsg2 || '') + (trainItem.arvlMsg3 || '');
     const arvlCd = trainItem.arvlCd; // '0':진입, '1':도착, '3':전역출발, '4':전역진입, '5':전역도착
 
     let shouldTrigger = false;
     let triggerReason = '';
+    const trainDesc = state.selectedTrainDesc || `[${stationName}역 방면 열차]`;
 
     // 1정거장 전 알람 ('1')
     if (state.subwayTrigger === '1') {
@@ -582,7 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
         msg.includes('도착') || msg.includes('진입')
       ) {
         shouldTrigger = true;
-        triggerReason = `[${trainItem.trainLineNm || stationName}] ${trainItem.arvlMsg2 || '전역 진입/도착'}`;
+        triggerReason = `${trainDesc} ${trainItem.arvlMsg2 || '전역 진입/도착'}`;
       }
     } 
     // 2정거장 전 알람 ('2')
@@ -592,7 +641,7 @@ document.addEventListener('DOMContentLoaded', () => {
         msg.includes('전역') || arvlCd === '4' || arvlCd === '5'
       ) {
         shouldTrigger = true;
-        triggerReason = `[${trainItem.trainLineNm || stationName}] ${trainItem.arvlMsg2 || '2정거장 전 접근'}`;
+        triggerReason = `${trainDesc} ${trainItem.arvlMsg2 || '2정거장 전 접근'}`;
       }
     } 
     // 목적지역 도착 즉시 ('0')
@@ -602,7 +651,7 @@ document.addEventListener('DOMContentLoaded', () => {
         arvlCd === '0' || arvlCd === '1'
       ) {
         shouldTrigger = true;
-        triggerReason = `[${stationName}역] 열차가 지금 도착/진입합니다!`;
+        triggerReason = `${trainDesc} ${stationName}역에 지금 도착/진입합니다!`;
       }
     }
 
@@ -726,6 +775,11 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    if (state.mode === 'SUBWAY' && !state.selectedTrainNo) {
+      alert('실시간 목록에서 탑승하신 열차를 먼저 1대 터치하여 선택해주세요.');
+      return;
+    }
+
     // 모바일 브라우저 오디오 & 백그라운드 유지 활성화 + 시스템 알림 권한 획득
     await alarm.prime();
 
@@ -733,7 +787,10 @@ document.addEventListener('DOMContentLoaded', () => {
     await requestWakeLock();
 
     state.isWatching = true;
-    updateStatusUI('active', state.mode === 'GPS' ? '실시간 GPS 감시 중' : '실시간 지하철 감시 중');
+    const activeMsg = state.mode === 'GPS' 
+      ? '실시간 GPS 감시 중' 
+      : (state.selectedTrainDesc ? `${state.selectedTrainDesc} 감시 중` : '선택 열차 감시 중');
+    updateStatusUI('active', activeMsg);
 
     btnToggleWatch.textContent = '감시 중단 (OFF)';
     btnToggleWatch.className = 'main-action-btn stop-btn';
